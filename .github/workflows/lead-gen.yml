@@ -1,0 +1,114 @@
+name: Lead Generation Pipeline
+
+on:
+  # Scheduled: runs every Monday and Thursday at 6 AM IST (00:30 UTC)
+  schedule:
+    - cron: "30 0 * * 1,4"
+
+  # Manual trigger with options
+  workflow_dispatch:
+    inputs:
+      portals:
+        description: "Portals to search (comma-separated: linkedin,naukri,glassdoor,foundit,indeed,shine)"
+        required: false
+        default: "linkedin,naukri,glassdoor"
+      queries:
+        description: "Job search queries (comma-separated)"
+        required: false
+        default: "React Developer,Frontend Developer,Frontend Engineer"
+      companies_file:
+        description: "Path to companies file (for stakeholders-only mode)"
+        required: false
+        default: ""
+
+jobs:
+  generate-leads:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Chrome
+        uses: browser-actions/setup-chrome@v1
+        with:
+          chrome-version: stable
+
+      - name: Install ChromeDriver
+        uses: nanasess/setup-chromedriver@v2
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Set up environment
+        run: |
+          echo "HEADLESS=true" >> .env
+          echo "LINKEDIN_EMAIL=${{ secrets.LINKEDIN_EMAIL }}" >> .env
+          echo "LINKEDIN_PASSWORD=${{ secrets.LINKEDIN_PASSWORD }}" >> .env
+          echo "REQUEST_DELAY_MIN=4" >> .env
+          echo "REQUEST_DELAY_MAX=8" >> .env
+          echo "BATCH_PAUSE=45" >> .env
+
+      - name: Load .env
+        run: |
+          set -a
+          source .env
+          set +a
+
+      - name: Download previous outputs
+        uses: actions/download-artifact@v4
+        with:
+          name: lead-gen-outputs
+          path: data/output/
+        continue-on-error: true  # First run won't have artifacts
+
+      - name: Run full pipeline
+        if: ${{ github.event.inputs.companies_file == '' }}
+        run: |
+          PORTALS="${{ github.event.inputs.portals || 'linkedin,naukri,glassdoor' }}"
+          QUERIES="${{ github.event.inputs.queries || 'React Developer,Frontend Developer' }}"
+
+          # Convert comma-separated to space-separated args
+          PORTAL_ARGS=$(echo "$PORTALS" | tr ',' ' ')
+          QUERY_ARGS=""
+          IFS=',' read -ra Q <<< "$QUERIES"
+          for q in "${Q[@]}"; do
+            QUERY_ARGS="$QUERY_ARGS \"$q\""
+          done
+
+          eval python main.py run --portals $PORTAL_ARGS --queries $QUERY_ARGS
+        env:
+          LINKEDIN_EMAIL: ${{ secrets.LINKEDIN_EMAIL }}
+          LINKEDIN_PASSWORD: ${{ secrets.LINKEDIN_PASSWORD }}
+          HEADLESS: "true"
+
+      - name: Run stakeholders only
+        if: ${{ github.event.inputs.companies_file != '' }}
+        run: |
+          python main.py stakeholders --file "${{ github.event.inputs.companies_file }}"
+        env:
+          LINKEDIN_EMAIL: ${{ secrets.LINKEDIN_EMAIL }}
+          LINKEDIN_PASSWORD: ${{ secrets.LINKEDIN_PASSWORD }}
+          HEADLESS: "true"
+
+      - name: Upload outputs as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: lead-gen-outputs
+          path: data/output/*.csv
+          retention-days: 90
+
+      - name: Commit new CSVs
+        run: |
+          git config user.name "Lead Gen Bot"
+          git config user.email "bot@leadgen.local"
+          git add data/output/*.csv || true
+          git diff --staged --quiet || git commit -m "Auto: new leads $(date +%Y-%m-%d)"
+          git push || echo "Push failed (maybe protected branch)"
+        continue-on-error: true

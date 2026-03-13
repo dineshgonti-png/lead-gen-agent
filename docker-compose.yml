@@ -1,0 +1,29 @@
+version: "3.8"
+
+services:
+  lead-gen-agent:
+    build: .
+    container_name: lead-gen-agent
+    env_file:
+      - .env
+    volumes:
+      # Persist output CSVs and cache on host
+      - ./data/output:/app/data/output
+      - ./data/cache:/app/data/cache
+    environment:
+      - HEADLESS=true
+    # Override command to run full pipeline
+    command: ["run"]
+
+  # One-off: search stakeholders for specific companies
+  stakeholders:
+    build: .
+    container_name: lead-gen-stakeholders
+    env_file:
+      - .env
+    volumes:
+      - ./data/output:/app/data/output
+      - ./data/cache:/app/data/cache
+    profiles:
+      - manual
+    command: ["stakeholders", "--file", "/app/data/cache/companies.txt"]
