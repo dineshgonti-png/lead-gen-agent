@@ -48,17 +48,26 @@ jobs:
 
       - name: Set up environment
         run: |
-          echo "HEADLESS=true" >> .env
-          echo "LINKEDIN_EMAIL=${{ secrets.LINKEDIN_EMAIL }}" >> .env
-          echo "LINKEDIN_PASSWORD=${{ secrets.LINKEDIN_PASSWORD }}" >> .env
-          echo "REQUEST_DELAY_MIN=4" >> .env
-          echo "REQUEST_DELAY_MAX=8" >> .env
-          echo "BATCH_PAUSE=45" >> .env
+          printf '%s\n' \
+            "HEADLESS=true" \
+            "LINKEDIN_EMAIL=${LINKEDIN_EMAIL}" \
+            "LINKEDIN_PASSWORD=${LINKEDIN_PASSWORD}" \
+            "REQUEST_DELAY_MIN=4" \
+            "REQUEST_DELAY_MAX=8" \
+            "BATCH_PAUSE=45" \
+            > .env
+        env:
+          LINKEDIN_EMAIL: ${{ secrets.LINKEDIN_EMAIL }}
+          LINKEDIN_PASSWORD: ${{ secrets.LINKEDIN_PASSWORD }}
 
       - name: Load .env
         run: |
           set -a
-          source .env
+          set +e
+          while IFS='=' read -r key value; do
+            [[ -z "$key" || "$key" =~ ^# ]] && continue
+            export "$key=$value"
+          done < .env
           set +a
 
       - name: Download previous outputs
